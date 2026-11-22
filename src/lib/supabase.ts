@@ -158,3 +158,261 @@ export async function obtenerPartiturasDeCarpeta(carpetaId: string): Promise<Par
 
   return lista.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }));
 }
+
+/**
+ * Obtiene todas las relaciones partitura_carpeta: mapa de partitura_id -> Set de carpeta_ids
+ */
+export async function obtenerMapaRelacionesCarpetas(): Promise<Record<string, string[]>> {
+  if (!isSupabaseConfigured) return {};
+
+  const { data, error } = await supabase
+    .from('partitura_carpeta')
+    .select('partitura_id, carpeta_id');
+
+  if (error) {
+    console.error('Error al obtener mapa de carpetas:', error.message);
+    return {};
+  }
+
+  const mapa: Record<string, string[]> = {};
+  for (const item of data || []) {
+    if (!mapa[item.partitura_id]) {
+      mapa[item.partitura_id] = [];
+    }
+    mapa[item.partitura_id].push(item.carpeta_id);
+  }
+  return mapa;
+}
+
+// -------------------------------------------------------------
+// FUNCIONES ADMINISTRATIVAS (Exigen rol admin vía RLS)
+// -------------------------------------------------------------
+
+/**
+ * Actualiza ÚNICAMENTE el nombre visual y las etiquetas de una partitura.
+ * El archivo PDF y su archivo_path nunca cambian.
+ */
+export async function actualizarPartitura(
+  id: string,
+  nombre: string,
+  etiquetas: string[]
+): Promise<void> {
+  const nombreLimpio = nombre.trim();
+  if (!nombreLimpio) throw new Error('El nombre de la partitura no puede estar vacío');
+
+  const { error } = await supabase
+    .from('partituras')
+    .update({
+      nombre: nombreLimpio,
+      etiquetas,
+    })
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Error al actualizar partitura: ${error.message}`);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Elimina una partitura del general:
+ * 1. Primero borra el objeto del storage.
+ * 2. Luego borra la fila de la BD (el ON DELETE CASCADE la remueve de todas las carpetas).
+ */
+export async function eliminarPartitura(id: string, archivo_path: string): Promise<void> {
+  // 1. Borrar de storage
+  const { error: errStorage } = await supabase.storage
+    .from('partituras')
+    .remove([archivo_path]);
+
+  if (errStorage) {
+    console.warn('Advertencia al borrar de storage:', errStorage.message);
+  }
+
+  // 2. Borrar de base de datos
+  const { error: errBD } = await supabase
+    .from('partituras')
+    .delete()
+    .eq('id', id);
+
+  if (errBD) {
+    throw new Error(`Error al eliminar registro de BD: ${errBD.message}`);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Eliminación masiva de partituras del general.
+ */
+export async function eliminarPartiturasMasivo(
+  items: { id: string; archivo_path: string }[]
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const rutas = items.map((it) => it.archivo_path).filter(Boolean);
+  const ids = items.map((it) => it.id);
+
+  // 1. Borrar archivos del storage
+  if (rutas.length > 0) {
+    const { error: errStorage } = await supabase.storage
+      .from('partituras')
+      .remove(rutas);
+
+    if (errStorage) {
+      console.warn('Advertencia al borrar archivos de storage:', errStorage.message);
+    }
+  }
+
+  // 2. Borrar registros de la base de datos
+  const { error: errBD } = await supabase
+    .from('partituras')
+    .delete()
+    .in('id', ids);
+
+  if (errBD) {
+    throw new Error(`Error al eliminar partituras de BD: ${errBD.message}`);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Asigna una lista de partituras a una carpeta.
+ */
+export async function asignarPartiturasACarpeta(
+  partituraIds: string[],
+  carpetaId: string
+): Promise<void> {
+  if (partituraIds.length === 0 || !carpetaId) return;
+
+  const registros = partituraIds.map((pId) => ({
+    partitura_id: pId,
+    carpeta_id: carpetaId,
+  }));
+
+  // Usar upsert para evitar errores de clave duplicada
+  const { error } = await supabase
+    .from('partitura_carpeta')
+    .upsert(registros, { onConflict: 'partitura_id,carpeta_id', ignoreDuplicates: true });
+
+  if (error) {
+    throw new Error(`Error al asignar a carpeta: ${error.message}`);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Quita una lista de partituras de una carpeta específica (sin borrarlas del general).
+ */
+export async function quitarPartiturasDeCarpeta(
+  partituraIds: string[],
+  carpetaId: string
+): Promise<void> {
+  if (partituraIds.length === 0 || !carpetaId) return;
+
+  const { error } = await supabase
+    .from('partitura_carpeta')
+    .delete()
+    .eq('carpeta_id', carpetaId)
+    .in('partitura_id', partituraIds);
+
+  if (error) {
+    throw new Error(`Error al quitar de carpeta: ${error.message}`);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Agrega etiquetas a múltiples partituras seleccionadas.
+ */
+export async function agregarEtiquetasMasivo(
+  partituras: Partitura[],
+  nuevasEtiquetas: string[]
+): Promise<void> {
+  if (partituras.length === 0 || nuevasEtiquetas.length === 0) return;
+
+  for (const p of partituras) {
+    const combinadas = Array.from(new Set([...(p.etiquetas || []), ...nuevasEtiquetas])).slice(0, 10);
+    await supabase.from('partituras').update({ etiquetas: combinadas }).eq('id', p.id);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Quita una etiqueta específica de múltiples partituras seleccionadas.
+ */
+export async function quitarEtiquetaMasivo(
+  partituras: Partitura[],
+  etiquetaAQuitar: string
+): Promise<void> {
+  if (partituras.length === 0 || !etiquetaAQuitar) return;
+
+  for (const p of partituras) {
+    const filtradas = (p.etiquetas || []).filter((t) => t !== etiquetaAQuitar);
+    await supabase.from('partituras').update({ etiquetas: filtradas }).eq('id', p.id);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Crea una nueva carpeta pública.
+ */
+export async function crearCarpeta(nombre: string): Promise<Carpeta> {
+  const nombreLimpio = nombre.trim();
+  if (!nombreLimpio) throw new Error('El nombre de la carpeta no puede estar vacío');
+
+  const { data, error } = await supabase
+    .from('carpetas')
+    .insert({ nombre: nombreLimpio })
+    .select('id, nombre, creado_en')
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Error al crear carpeta: ${error?.message || 'Desconocido'}`);
+  }
+
+  invalidarCache();
+  return { ...data, cantidad_partituras: 0 };
+}
+
+/**
+ * Renombra una carpeta existente.
+ */
+export async function renombrarCarpeta(id: string, nuevoNombre: string): Promise<void> {
+  const nombreLimpio = nuevoNombre.trim();
+  if (!nombreLimpio) throw new Error('El nombre de la carpeta no puede estar vacío');
+
+  const { error } = await supabase
+    .from('carpetas')
+    .update({ nombre: nombreLimpio })
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Error al renombrar carpeta: ${error.message}`);
+  }
+
+  invalidarCache();
+}
+
+/**
+ * Elimina una carpeta.
+ * IMPORTANTE: Nunca borra partituras, solo la carpeta y las referencias en partitura_carpeta.
+ */
+export async function eliminarCarpeta(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('carpetas')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`Error al eliminar carpeta: ${error.message}`);
+  }
+
+  invalidarCache();
+}

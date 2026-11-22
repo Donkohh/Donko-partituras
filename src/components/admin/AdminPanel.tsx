@@ -2,10 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { obtenerEstadoAuth, cerrarSesion, type AuthState } from '../../lib/auth';
 import { Login } from './Login';
 import { Subida } from './Subida';
+import { TablaRepertorio } from './TablaRepertorio';
+import { Carpetas } from './Carpetas';
+
+type TabAdmin = 'repertorio' | 'subida' | 'carpetas';
 
 export const AdminPanel: React.FC = () => {
   const [auth, setAuth] = useState<AuthState>({ user: null, session: null, isAdmin: false });
   const [cargandoAuth, setCargandoAuth] = useState(true);
+  const [tabActiva, setTabActiva] = useState<TabAdmin>('repertorio');
 
   const verificarSesion = async () => {
     try {
@@ -82,18 +87,53 @@ export const AdminPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* Sección principal: Subida masiva */}
-      <div className="space-y-6">
-        <div className="border-b border-white/5 pb-4">
-          <h2 className="text-2xl font-['Instrument_Serif'] italic text-white flex items-center gap-2">
-            <span>Subida Masiva de Partituras</span>
-          </h2>
-          <p className="text-xs text-gray-400 mt-1">
-            Los archivos PDF se validan, se desduplican y se transfieren directamente a Supabase Storage con concurrencia controlada.
-          </p>
-        </div>
+      {/* Selector de pestañas */}
+      <div className="flex items-center gap-2 border-b border-white/10 mb-8 pb-px overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => setTabActiva('repertorio')}
+          className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-all flex items-center gap-2 shrink-0 ${
+            tabActiva === 'repertorio'
+              ? 'border-[#f5b942] text-[#f5b942] font-semibold'
+              : 'border-transparent text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <span>📋</span>
+          <span>Gestión de Repertorio</span>
+        </button>
 
-        <Subida />
+        <button
+          type="button"
+          onClick={() => setTabActiva('subida')}
+          className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-all flex items-center gap-2 shrink-0 ${
+            tabActiva === 'subida'
+              ? 'border-[#f5b942] text-[#f5b942] font-semibold'
+              : 'border-transparent text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <span>📤</span>
+          <span>Subida Masiva de PDFs</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setTabActiva('carpetas')}
+          className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-all flex items-center gap-2 shrink-0 ${
+            tabActiva === 'carpetas'
+              ? 'border-[#f5b942] text-[#f5b942] font-semibold'
+              : 'border-transparent text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          <span>📁</span>
+          <span>Gestión de Carpetas</span>
+        </button>
+      </div>
+
+      {/* Contenido según la pestaña activa */}
+      <div>
+        {tabActiva === 'repertorio' && <TablaRepertorio />}
+        {tabActiva === 'subida' && <Subida />}
+        {tabActiva === 'carpetas' && <Carpetas />}
       </div>
     </div>
   );
