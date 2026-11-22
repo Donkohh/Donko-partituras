@@ -1,0 +1,29 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base>
+  <div class="relative overflow-hidden staff-lines py-16 sm:py-24 border-b border-white/5">
+    <!-- Glow radial -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] bg-gradient-to-tr from-[#f5b942]/10 via-[#8b5cf6]/10 to-transparent blur-3xl pointer-events-none rounded-full"></div>
+
+    <div class="max-w-4xl mx-auto px-4 text-center relative z-10">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-[#f5b942] mb-6">
+        <span class="w-1.5 h-1.5 rounded-full bg-[#f5b942] animate-pulse"></span>
+        Repertorio General
+      </div>
+      <h1 class="text-4xl sm:text-6xl font-['Instrument_Serif'] italic tracking-wide text-white mb-4">
+        Música y Partituras
+      </h1>
+      <p class="text-gray-400 text-sm sm:text-base max-w-xl mx-auto leading-relaxed">
+        Explora, busca y abre partituras en alta calidad directamente en tu navegador.
+      </p>
+    </div>
+  </div>
+
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-12 w-full">
+    <div class="bg-[#14141c] border border-white/5 rounded-2xl p-8 text-center text-gray-400">
+      <p class="text-sm">Fase 1 completada con éxito. Inicializando repertorio interactivo para Fase 2...</p>
+    </div>
+  </div>
+</Base>
