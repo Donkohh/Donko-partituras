@@ -3,6 +3,12 @@ import { supabase, obtenerCarpetas, invalidarCache } from '../../lib/supabase';
 import { validarArchivoPdf, limpiarNombreArchivo } from '../../lib/validarPdf';
 import { calcularSha256 } from '../../lib/hash';
 import type { Carpeta } from '../../lib/tipos';
+import {
+  LIMITES,
+  avisosSanitizacion,
+  limpiarNombrePartitura,
+  sanitizarEtiquetas,
+} from '../../lib/validarTexto';
 
 interface ArchivoEnCola {
   id: string;
@@ -30,27 +36,45 @@ export const Subida: React.FC = () => {
   const [carpetasDisponibles, setCarpetasDisponibles] = useState<Carpeta[]>([]);
   const [carpetasSeleccionadas, setCarpetasSeleccionadas] = useState<string[]>([]);
   const [resumen, setResumen] = useState<ResumenSubida | null>(null);
+  const [avisosLote, setAvisosLote] = useState<string[]>([]);
+  const [errorCarpetas, setErrorCarpetas] = useState<string | null>(null);
 
   const canceladoRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Cargar carpetas disponibles para asignación opcional
   useEffect(() => {
-    obtenerCarpetas().then(setCarpetasDisponibles).catch(console.error);
+    obtenerCarpetas()
+      .then(setCarpetasDisponibles)
+      .catch((err: unknown) => {
+        setErrorCarpetas(err instanceof Error ? err.message : 'No se pudieron cargar las carpetas');
+      });
   }, []);
 
   // Manejo de selección de archivos
   const agregarArchivos = (archivosNuevos: FileList | File[]) => {
     const lista = Array.from(archivosNuevos);
-    const nuevosItems: ArchivoEnCola[] = lista.map((file) => ({
+    const espacio = LIMITES.maxArchivosPorLote - cola.length;
+    const avisos: string[] = [];
+
+    if (espacio <= 0) {
+      setAvisosLote([`El lote está completo (máximo ${LIMITES.maxArchivosPorLote} archivos).`]);
+      return;
+    }
+    if (lista.length > espacio) {
+      avisos.push(`Solo se agregaron ${espacio} archivos; el máximo por lote es ${LIMITES.maxArchivosPorLote}.`);
+    }
+
+    const nuevosItems: ArchivoEnCola[] = lista.slice(0, espacio).map((file) => ({
       id: crypto.randomUUID(),
       archivo: file,
-      nombreVisual: limpiarNombreArchivo(file.name),
+      nombreVisual: limpiarNombrePartitura(limpiarNombreArchivo(file.name)) || 'Partitura',
       estado: 'pendiente',
       progreso: 0,
     }));
 
     setCola((prev) => [...prev, ...nuevosItems]);
+    setAvisosLote(avisos);
     setResumen(null);
   };
 
@@ -81,18 +105,6 @@ export const Subida: React.FC = () => {
     canceladoRef.current = true;
   };
 
-  // Parsear y sanitizar etiquetas del lote (máx 10 etiquetas, máx 40 caracteres cada una)
-  const sanitizarEtiquetas = (input: string): string[] => {
-    const separadas = input
-      .split(',')
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0)
-      .map((t) => t.slice(0, 40));
-
-    // Desduplicar y tomar máximo 10
-    return Array.from(new Set(separadas)).slice(0, 10);
-  };
-
   // Proceso principal de validación, hashes, desduplicación y subida
   const iniciarSubida = async () => {
     if (cola.length === 0 || estaSubiendo) return;
@@ -102,6 +114,8 @@ export const Subida: React.FC = () => {
     setResumen(null);
 
     const etiquetasFinales = sanitizarEtiquetas(etiquetasLote);
+    const avisosEtiquetas = avisosSanitizacion(etiquetasLote);
+    setAvisosLote((prev) => Array.from(new Set([...prev, ...avisosEtiquetas])));
     const carpetasFinales = [...carpetasSeleccionadas];
 
     const duplicadosList: { nombre: string; motivo: string }[] = [];
@@ -114,6 +128,11 @@ export const Subida: React.FC = () => {
 
     for (let i = 0; i < cola.length; i++) {
       if (canceladoRef.current) break;
+
+      // Ceder el hilo cada pocos archivos para que la UI siga respondiendo con lotes grandes.
+      if (i > 0 && i % 5 === 0) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
 
       const item = cola[i];
       setCola((prev) =>
@@ -332,9 +351,11 @@ export const Subida: React.FC = () => {
     setEstaSubiendo(false);
   };
 
-  // Estadísticas globales de progreso
-  const completados = cola.filter((c) => c.estado === 'completado').length;
-  const porcentajeGlobal = cola.length > 0 ? Math.round((completados / cola.length) * 100) : 0;
+  // Estadísticas globales de progreso (los estados terminales también cuentan)
+  const finalizados = cola.filter((c) =>
+    ['completado', 'duplicado', 'error'].includes(c.estado)
+  ).length;
+  const porcentajeGlobal = cola.length > 0 ? Math.round((finalizados / cola.length) * 100) : 0;
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-6">
@@ -377,6 +398,14 @@ export const Subida: React.FC = () => {
         </div>
       </div>
 
+      {avisosLote.length > 0 && (
+        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs space-y-1" role="status">
+          {avisosLote.map((aviso) => (
+            <p key={aviso}>⚠️ {aviso}</p>
+          ))}
+        </div>
+      )}
+
       {/* Opciones de Lote: Etiquetas y Carpetas */}
       {cola.length > 0 && (
         <div className="bg-[#14141c] border border-white/5 rounded-2xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -401,7 +430,11 @@ export const Subida: React.FC = () => {
             <label className="block text-xs font-medium text-gray-300 mb-1.5">
               Asignar a carpetas (opcional)
             </label>
-            {carpetasDisponibles.length === 0 ? (
+            {errorCarpetas ? (
+              <span className="text-xs text-red-400 block py-2" role="alert">
+                No se pudieron cargar las carpetas: {errorCarpetas}
+              </span>
+            ) : carpetasDisponibles.length === 0 ? (
               <span className="text-xs text-gray-500 italic block py-2">
                 No hay carpetas creadas aún.
               </span>
@@ -442,7 +475,7 @@ export const Subida: React.FC = () => {
             <strong>{cola.length}</strong> {cola.length === 1 ? 'archivo en cola' : 'archivos en cola'}{' '}
             {estaSubiendo && (
               <span className="text-[#f5b942] ml-2">
-                (Subiendo... {completados}/{cola.length} - {porcentajeGlobal}%)
+                (Subiendo... {finalizados}/{cola.length} - {porcentajeGlobal}%)
               </span>
             )}
           </div>
@@ -595,6 +628,7 @@ export const Subida: React.FC = () => {
                       onClick={() => setCola((prev) => prev.filter((it) => it.id !== item.id))}
                       className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
                       title="Eliminar de la cola"
+                      aria-label={`Quitar ${item.nombreVisual} de la cola`}
                     >
                       ✕
                     </button>

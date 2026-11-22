@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { Carpeta } from '../../lib/tipos';
+import { useEscape } from '../../lib/hooks';
 
 interface SelectorCarpetaProps {
   carpetas: Carpeta[];
@@ -21,6 +22,8 @@ export const SelectorCarpeta: React.FC<SelectorCarpetaProps> = ({
   );
   const [procesando, setProcesando] = useState(false);
 
+  useEscape(true, onCerrar);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!carpetaSeleccionada) return;
@@ -38,7 +41,12 @@ export const SelectorCarpeta: React.FC<SelectorCarpetaProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="bg-[#14141c] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
+        className="bg-[#14141c] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+      >
         <div className="flex items-center justify-between border-b border-white/5 pb-3">
           <h3 className="text-base font-semibold text-gray-100 flex items-center gap-2">
             <span>📁</span>
@@ -48,6 +56,7 @@ export const SelectorCarpeta: React.FC<SelectorCarpetaProps> = ({
             type="button"
             onClick={onCerrar}
             className="text-gray-400 hover:text-white p-1 rounded-lg transition-colors"
+            aria-label="Cerrar selector de carpeta"
           >
             ✕
           </button>

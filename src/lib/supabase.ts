@@ -1,5 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Partitura, Carpeta } from './tipos';
+import {
+  limpiarNombreCarpeta,
+  limpiarNombrePartitura,
+  sanitizarEtiquetas,
+} from './validarTexto';
 
 const rawUrl = import.meta.env.PUBLIC_SUPABASE_URL;
 const rawKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
@@ -21,6 +26,9 @@ export function getPublicPdfUrl(archivoPath: string): string {
   if (!rawUrl || !archivoPath) return '#';
   return `${rawUrl}/storage/v1/object/public/partituras/${archivoPath}`;
 }
+
+// Supabase devuelve como máximo 1000 filas por request.
+const TAMANO_PAGINA = 1000;
 
 // Caché en memoria durante la sesión del navegador
 let cachePartituras: Partitura[] | null = null;
@@ -46,7 +54,6 @@ export async function obtenerPartituras(forzarRecarga = false): Promise<Partitur
   }
 
   const todas: Partitura[] = [];
-  const TAMANO_PAGINA = 1000;
   let desde = 0;
   let hayMas = true;
 
@@ -100,19 +107,30 @@ export async function obtenerCarpetas(forzarRecarga = false): Promise<Carpeta[]>
     throw errCarpetas;
   }
 
-  // Traer conteo de partituras por carpeta
-  const { data: relaciones, error: errRelaciones } = await supabase
-    .from('partitura_carpeta')
-    .select('carpeta_id');
-
-  if (errRelaciones) {
-    console.warn('No se pudieron obtener relaciones partitura_carpeta:', errRelaciones.message);
-  }
-
+  // Traer conteo de partituras por carpeta (paginado)
   const conteos: Record<string, number> = {};
-  if (relaciones) {
-    for (const rel of relaciones) {
+  let desdeRelaciones = 0;
+  let hayMasRelaciones = true;
+
+  while (hayMasRelaciones) {
+    const { data: relaciones, error: errRelaciones } = await supabase
+      .from('partitura_carpeta')
+      .select('carpeta_id')
+      .range(desdeRelaciones, desdeRelaciones + TAMANO_PAGINA - 1);
+
+    if (errRelaciones) {
+      console.warn('No se pudieron obtener relaciones partitura_carpeta:', errRelaciones.message);
+      break;
+    }
+
+    for (const rel of relaciones || []) {
       conteos[rel.carpeta_id] = (conteos[rel.carpeta_id] || 0) + 1;
+    }
+
+    if (!relaciones || relaciones.length < TAMANO_PAGINA) {
+      hayMasRelaciones = false;
+    } else {
+      desdeRelaciones += TAMANO_PAGINA;
     }
   }
 
@@ -133,26 +151,36 @@ export async function obtenerCarpetas(forzarRecarga = false): Promise<Carpeta[]>
 export async function obtenerPartiturasDeCarpeta(carpetaId: string): Promise<Partitura[]> {
   if (!isSupabaseConfigured || !carpetaId) return [];
 
-  const { data, error } = await supabase
-    .from('partitura_carpeta')
-    .select('partituras(id, nombre, archivo_path, hash_sha256, etiquetas, tamano_bytes, creado_en)')
-    .eq('carpeta_id', carpetaId);
-
-  if (error) {
-    console.error(`Error al obtener partituras de carpeta ${carpetaId}:`, error.message);
-    throw error;
-  }
-
-  if (!data) return [];
-
   const lista: Partitura[] = [];
-  for (const item of data) {
-    if (item.partituras) {
-      if (Array.isArray(item.partituras)) {
-        lista.push(...(item.partituras as unknown as Partitura[]));
-      } else {
-        lista.push(item.partituras as unknown as Partitura);
+  let desde = 0;
+  let hayMas = true;
+
+  while (hayMas) {
+    const { data, error } = await supabase
+      .from('partitura_carpeta')
+      .select('partituras(id, nombre, archivo_path, hash_sha256, etiquetas, tamano_bytes, creado_en)')
+      .eq('carpeta_id', carpetaId)
+      .range(desde, desde + TAMANO_PAGINA - 1);
+
+    if (error) {
+      console.error(`Error al obtener partituras de carpeta ${carpetaId}:`, error.message);
+      throw error;
+    }
+
+    for (const item of data || []) {
+      if (item.partituras) {
+        if (Array.isArray(item.partituras)) {
+          lista.push(...(item.partituras as unknown as Partitura[]));
+        } else {
+          lista.push(item.partituras as unknown as Partitura);
+        }
       }
+    }
+
+    if (!data || data.length < TAMANO_PAGINA) {
+      hayMas = false;
+    } else {
+      desde += TAMANO_PAGINA;
     }
   }
 
@@ -165,22 +193,35 @@ export async function obtenerPartiturasDeCarpeta(carpetaId: string): Promise<Par
 export async function obtenerMapaRelacionesCarpetas(): Promise<Record<string, string[]>> {
   if (!isSupabaseConfigured) return {};
 
-  const { data, error } = await supabase
-    .from('partitura_carpeta')
-    .select('partitura_id, carpeta_id');
-
-  if (error) {
-    console.error('Error al obtener mapa de carpetas:', error.message);
-    return {};
-  }
-
   const mapa: Record<string, string[]> = {};
-  for (const item of data || []) {
-    if (!mapa[item.partitura_id]) {
-      mapa[item.partitura_id] = [];
+  let desde = 0;
+  let hayMas = true;
+
+  while (hayMas) {
+    const { data, error } = await supabase
+      .from('partitura_carpeta')
+      .select('partitura_id, carpeta_id')
+      .range(desde, desde + TAMANO_PAGINA - 1);
+
+    if (error) {
+      console.error('Error al obtener mapa de carpetas:', error.message);
+      return mapa;
     }
-    mapa[item.partitura_id].push(item.carpeta_id);
+
+    for (const item of data || []) {
+      if (!mapa[item.partitura_id]) {
+        mapa[item.partitura_id] = [];
+      }
+      mapa[item.partitura_id].push(item.carpeta_id);
+    }
+
+    if (!data || data.length < TAMANO_PAGINA) {
+      hayMas = false;
+    } else {
+      desde += TAMANO_PAGINA;
+    }
   }
+
   return mapa;
 }
 
@@ -197,14 +238,16 @@ export async function actualizarPartitura(
   nombre: string,
   etiquetas: string[]
 ): Promise<void> {
-  const nombreLimpio = nombre.trim();
+  const nombreLimpio = limpiarNombrePartitura(nombre);
   if (!nombreLimpio) throw new Error('El nombre de la partitura no puede estar vacío');
+
+  const etiquetasLimpas = sanitizarEtiquetas(etiquetas);
 
   const { error } = await supabase
     .from('partituras')
     .update({
       nombre: nombreLimpio,
-      etiquetas,
+      etiquetas: etiquetasLimpas,
     })
     .eq('id', id);
 
@@ -333,11 +376,21 @@ export async function agregarEtiquetasMasivo(
   partituras: Partitura[],
   nuevasEtiquetas: string[]
 ): Promise<void> {
-  if (partituras.length === 0 || nuevasEtiquetas.length === 0) return;
+  const limpias = sanitizarEtiquetas(nuevasEtiquetas);
+  if (partituras.length === 0 || limpias.length === 0) return;
 
+  const fallos: string[] = [];
   for (const p of partituras) {
-    const combinadas = Array.from(new Set([...(p.etiquetas || []), ...nuevasEtiquetas])).slice(0, 10);
-    await supabase.from('partituras').update({ etiquetas: combinadas }).eq('id', p.id);
+    const combinadas = sanitizarEtiquetas([...(p.etiquetas || []), ...limpias]);
+    const { error } = await supabase
+      .from('partituras')
+      .update({ etiquetas: combinadas })
+      .eq('id', p.id);
+    if (error) fallos.push(p.nombre);
+  }
+
+  if (fallos.length > 0) {
+    throw new Error(`No se pudieron actualizar ${fallos.length} partitura(s).`);
   }
 
   invalidarCache();
@@ -352,9 +405,21 @@ export async function quitarEtiquetaMasivo(
 ): Promise<void> {
   if (partituras.length === 0 || !etiquetaAQuitar) return;
 
+  const objetivo = sanitizarEtiquetas([etiquetaAQuitar])[0];
+  if (!objetivo) return;
+
+  const fallos: string[] = [];
   for (const p of partituras) {
-    const filtradas = (p.etiquetas || []).filter((t) => t !== etiquetaAQuitar);
-    await supabase.from('partituras').update({ etiquetas: filtradas }).eq('id', p.id);
+    const filtradas = (p.etiquetas || []).filter((t) => t !== objetivo);
+    const { error } = await supabase
+      .from('partituras')
+      .update({ etiquetas: filtradas })
+      .eq('id', p.id);
+    if (error) fallos.push(p.nombre);
+  }
+
+  if (fallos.length > 0) {
+    throw new Error(`No se pudieron actualizar ${fallos.length} partitura(s).`);
   }
 
   invalidarCache();
@@ -364,7 +429,7 @@ export async function quitarEtiquetaMasivo(
  * Crea una nueva carpeta pública.
  */
 export async function crearCarpeta(nombre: string): Promise<Carpeta> {
-  const nombreLimpio = nombre.trim();
+  const nombreLimpio = limpiarNombreCarpeta(nombre);
   if (!nombreLimpio) throw new Error('El nombre de la carpeta no puede estar vacío');
 
   const { data, error } = await supabase
@@ -385,7 +450,7 @@ export async function crearCarpeta(nombre: string): Promise<Carpeta> {
  * Renombra una carpeta existente.
  */
 export async function renombrarCarpeta(id: string, nuevoNombre: string): Promise<void> {
-  const nombreLimpio = nuevoNombre.trim();
+  const nombreLimpio = limpiarNombreCarpeta(nuevoNombre);
   if (!nombreLimpio) throw new Error('El nombre de la carpeta no puede estar vacío');
 
   const { error } = await supabase

@@ -29,12 +29,21 @@ const currentPath = Astro.url.pathname;
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    <meta name="theme-color" content="#0a0a0f" />
     {noindex && <meta name="robots" content="noindex,nofollow" />}
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content={Astro.url.href} />
   </head>
   <body class="bg-[#0a0a0f] text-gray-100 min-h-screen flex flex-col selection:bg-[#f5b942]/30 selection:text-white">
+    <a
+      href="#contenido"
+      class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-lg focus:bg-[#f5b942] focus:text-[#0a0a0f] focus:font-semibold"
+    >
+      Saltar al contenido
+    </a>
+
     <!-- Header -->
     <header class="border-b border-white/5 bg-[#0a0a0f]/80 backdrop-blur-md sticky top-0 z-40 transition-colors">
       <div class="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -85,7 +94,7 @@ const currentPath = Astro.url.pathname;
     </header>
 
     <!-- Main Content -->
-    <main class="flex-1 flex flex-col">
+    <main id="contenido" class="flex-1 flex flex-col">
       <slot />
     </main>
 

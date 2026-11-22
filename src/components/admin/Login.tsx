@@ -30,7 +30,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginExitoso }) => {
       await iniciarSesionAdmin(email, password, captchaToken);
       onLoginExitoso();
     } catch (err: unknown) {
-      console.error('[Login Catch]:', err);
+      console.error('Login error:', err);
       // Mensaje estrictamente genérico según sección 5 y 7 de AGENTS.md
       setError('Credenciales inválidas');
       setCaptchaToken(undefined);
@@ -61,6 +61,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginExitoso }) => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
             <span>{error}</span>
+          </div>
+        )}
+
+        {!siteKeyConfigurada && (
+          <div className="mb-6 p-3 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-[11px] leading-relaxed" role="status">
+            El captcha Turnstile no está configurado. Define <code>PUBLIC_TURNSTILE_SITE_KEY</code> antes de desplegar a producción.
           </div>
         )}
 

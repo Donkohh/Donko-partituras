@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useDebouncedValor } from '../../lib/hooks';
 
 interface BuscadorProps {
   valor: string;
@@ -14,6 +15,20 @@ export const Buscador: React.FC<BuscadorProps> = ({
   totalResultados,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [valorLocal, setValorLocal] = useState(valor);
+  const valorDebounced = useDebouncedValor(valorLocal, 100);
+
+  // Sincroniza cambios externos (por ejemplo, "Limpiar búsqueda y filtros").
+  useEffect(() => {
+    setValorLocal(valor);
+  }, [valor]);
+
+  // Notifica al padre con debounce de ~100 ms.
+  useEffect(() => {
+    if (valorDebounced !== valor) {
+      onCambio(valorDebounced);
+    }
+  }, [valorDebounced]);
 
   // Atajo de teclado: presionar '/' para enfocar el buscador
   useEffect(() => {
@@ -50,8 +65,8 @@ export const Buscador: React.FC<BuscadorProps> = ({
         <input
           ref={inputRef}
           type="text"
-          value={valor}
-          onChange={(e) => onCambio(e.target.value)}
+          value={valorLocal}
+          onChange={(e) => setValorLocal(e.target.value)}
           placeholder={placeholder}
           aria-label="Buscar partituras"
           className="w-full py-3.5 px-2 bg-transparent text-gray-100 placeholder-gray-500 text-sm sm:text-base focus:outline-none"
@@ -59,10 +74,11 @@ export const Buscador: React.FC<BuscadorProps> = ({
 
         {/* Atajo visual o botón limpiar */}
         <div className="pr-3 flex items-center gap-2">
-          {valor ? (
+          {valorLocal ? (
             <button
               type="button"
               onClick={() => {
+                setValorLocal('');
                 onCambio('');
                 inputRef.current?.focus();
               }}

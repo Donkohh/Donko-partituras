@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { obtenerEstadoAuth, cerrarSesion, type AuthState } from '../../lib/auth';
+import { obtenerEstadoAuth, observarSesion, cerrarSesion, type AuthState } from '../../lib/auth';
 import { Login } from './Login';
 import { Subida } from './Subida';
 import { TablaRepertorio } from './TablaRepertorio';
@@ -27,6 +27,7 @@ export const AdminPanel: React.FC = () => {
 
   useEffect(() => {
     verificarSesion();
+    return observarSesion((estado) => setAuth(estado));
   }, []);
 
   const handleCerrarSesion = async () => {

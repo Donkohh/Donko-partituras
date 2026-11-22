@@ -25,7 +25,7 @@ export async function iniciarSesionAdmin(
   });
 
   if (error) {
-    console.error('[Auth Error Detalle]:', error.message, error);
+    console.error('Auth error:', error.message);
     throw new Error('Credenciales inválidas');
   }
 
@@ -36,7 +36,7 @@ export async function iniciarSesionAdmin(
   // Comprobar estrictamente rol 'admin' en app_metadata
   const rol = data.user.app_metadata?.role;
   if (rol !== 'admin') {
-    console.warn('[Auth Warning]: Usuario autenticado pero sin rol admin en app_metadata:', data.user.app_metadata);
+    console.warn('Auth: usuario sin rol admin:', data.user.app_metadata);
     await supabase.auth.signOut();
     throw new Error('Credenciales inválidas');
   }
@@ -65,4 +65,21 @@ export async function obtenerEstadoAuth(): Promise<AuthState> {
     session,
     isAdmin,
   };
+}
+
+/**
+ * Mantiene sincronizado el estado de la sesión (por ejemplo, si se revoca el rol
+ * o el token se refresca). La autorización real de escritura sigue siendo RLS.
+ */
+export function observarSesion(alCambiar: (estado: AuthState) => void): () => void {
+  const { data } = supabase.auth.onAuthStateChange((_evento, session) => {
+    const user = session?.user || null;
+    alCambiar({
+      user,
+      session,
+      isAdmin: user?.app_metadata?.role === 'admin',
+    });
+  });
+
+  return () => data.subscription.unsubscribe();
 }

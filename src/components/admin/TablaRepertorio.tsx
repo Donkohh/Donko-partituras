@@ -14,6 +14,12 @@ import {
   getPublicPdfUrl,
 } from '../../lib/supabase';
 import { normalizarTexto } from '../../lib/normalizar';
+import { useDebouncedValor, useEscape } from '../../lib/hooks';
+import {
+  LIMITES,
+  limpiarNombrePartitura,
+  sanitizarEtiquetas,
+} from '../../lib/validarTexto';
 import { SelectorCarpeta } from './SelectorCarpeta';
 
 export const TablaRepertorio: React.FC = () => {
@@ -21,10 +27,12 @@ export const TablaRepertorio: React.FC = () => {
   const [carpetas, setCarpetas] = useState<Carpeta[]>([]);
   const [mapaCarpetas, setMapaCarpetas] = useState<Record<string, string[]>>({});
   const [cargando, setCargando] = useState(true);
-  const [mensajeFeedback, setMensajeFeedback] = useState<string | null>(null);
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ mensaje: string; tipo: 'ok' | 'error' } | null>(null);
 
   // Filtros
   const [busqueda, setBusqueda] = useState('');
+  const busquedaDebounced = useDebouncedValor(busqueda, 100);
   const [etiquetaFiltro, setEtiquetaFiltro] = useState<string>('todas');
 
   // Selección múltiple
@@ -44,10 +52,17 @@ export const TablaRepertorio: React.FC = () => {
   const [confirmarEliminarMasivo, setConfirmarEliminarMasivo] = useState(false);
   const [procesandoAccion, setProcesandoAccion] = useState(false);
 
+  useEscape(mostrarSelectorCarpeta, () => setMostrarSelectorCarpeta(false));
+  useEscape(mostrarQuitarDeCarpeta, () => setMostrarQuitarDeCarpeta(false));
+  useEscape(mostrarModalEtiquetas, () => setMostrarModalEtiquetas(false));
+  useEscape(Boolean(partituraAEliminar), () => setPartituraAEliminar(null));
+  useEscape(confirmarEliminarMasivo, () => setConfirmarEliminarMasivo(false));
+
   // Cargar datos
   const cargarTodo = async (forzar = false) => {
     try {
       setCargando(true);
+      setErrorCarga(null);
       const [pts, crps, mapa] = await Promise.all([
         obtenerPartituras(forzar),
         obtenerCarpetas(forzar),
@@ -58,6 +73,7 @@ export const TablaRepertorio: React.FC = () => {
       setMapaCarpetas(mapa);
     } catch (err) {
       console.error('Error al cargar datos del repertorio:', err);
+      setErrorCarga(err instanceof Error ? err.message : 'No se pudo cargar el repertorio');
     } finally {
       setCargando(false);
     }
@@ -67,9 +83,9 @@ export const TablaRepertorio: React.FC = () => {
     cargarTodo();
   }, []);
 
-  const notificar = (msg: string) => {
-    setMensajeFeedback(msg);
-    setTimeout(() => setMensajeFeedback(null), 4000);
+  const notificar = (mensaje: string, tipo: 'ok' | 'error' = 'ok') => {
+    setFeedback({ mensaje, tipo });
+    window.setTimeout(() => setFeedback(null), 5000);
   };
 
   // Extraer todas las etiquetas para el filtro
@@ -85,7 +101,7 @@ export const TablaRepertorio: React.FC = () => {
 
   // Filtrado
   const partiturasFiltradas = useMemo(() => {
-    const bNorm = normalizarTexto(busqueda);
+    const bNorm = normalizarTexto(busquedaDebounced);
     return partituras.filter((p) => {
       if (etiquetaFiltro !== 'todas') {
         if (!p.etiquetas?.includes(etiquetaFiltro)) return false;
@@ -97,7 +113,7 @@ export const TablaRepertorio: React.FC = () => {
       }
       return true;
     });
-  }, [partituras, busqueda, etiquetaFiltro]);
+  }, [partituras, busquedaDebounced, etiquetaFiltro]);
 
   // Selección
   const todosSeleccionados =
@@ -139,23 +155,24 @@ export const TablaRepertorio: React.FC = () => {
   };
 
   const guardarEdicion = async (id: string) => {
-    const tags = etiquetasEdicion
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map((t) => t.slice(0, 40))
-      .slice(0, 10);
+    const nombre = limpiarNombrePartitura(nombreEdicion);
+    if (!nombre) {
+      notificar('El nombre de la partitura no puede estar vacío.', 'error');
+      return;
+    }
+
+    const tags = sanitizarEtiquetas(etiquetasEdicion);
 
     try {
       setProcesandoAccion(true);
-      await actualizarPartitura(id, nombreEdicion, tags);
+      await actualizarPartitura(id, nombre, tags);
       setPartituras((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, nombre: nombreEdicion.trim(), etiquetas: tags } : p))
+        prev.map((p) => (p.id === id ? { ...p, nombre, etiquetas: tags } : p))
       );
       cancelarEdicion();
       notificar('Partitura actualizada correctamente.');
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error al actualizar');
+      notificar(err instanceof Error ? err.message : 'Error al actualizar', 'error');
     } finally {
       setProcesandoAccion(false);
     }
@@ -176,7 +193,7 @@ export const TablaRepertorio: React.FC = () => {
       notificar(`"${partituraAEliminar.nombre}" eliminada del repertorio y del storage.`);
       setPartituraAEliminar(null);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error al eliminar');
+      notificar(err instanceof Error ? err.message : 'Error al eliminar', 'error');
     } finally {
       setProcesandoAccion(false);
     }
@@ -195,7 +212,7 @@ export const TablaRepertorio: React.FC = () => {
       setSeleccionados(new Set());
       setConfirmarEliminarMasivo(false);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error en eliminación masiva');
+      notificar(err instanceof Error ? err.message : 'Error en eliminación masiva', 'error');
     } finally {
       setProcesandoAccion(false);
     }
@@ -204,29 +221,43 @@ export const TablaRepertorio: React.FC = () => {
   // Asignar masivo a carpeta
   const handleAsignarACarpeta = async (carpetaId: string) => {
     const ids = Array.from(seleccionados);
-    await asignarPartiturasACarpeta(ids, carpetaId);
-    notificar(`${ids.length} partituras asignadas a la carpeta.`);
-    setSeleccionados(new Set());
-    cargarTodo(true);
+    try {
+      setProcesandoAccion(true);
+      await asignarPartiturasACarpeta(ids, carpetaId);
+      notificar(`${ids.length} partituras asignadas a la carpeta.`);
+      setSeleccionados(new Set());
+      await cargarTodo(true);
+    } catch (err: unknown) {
+      notificar(err instanceof Error ? err.message : 'Error al asignar a carpeta', 'error');
+    } finally {
+      setProcesandoAccion(false);
+    }
   };
 
   // Quitar masivo de carpeta
   const handleQuitarDeCarpeta = async (carpetaId: string) => {
     const ids = Array.from(seleccionados);
-    await quitarPartiturasDeCarpeta(ids, carpetaId);
-    notificar(`${ids.length} partituras removidas de la carpeta.`);
-    setSeleccionados(new Set());
-    setMostrarQuitarDeCarpeta(false);
-    cargarTodo(true);
+    try {
+      setProcesandoAccion(true);
+      await quitarPartiturasDeCarpeta(ids, carpetaId);
+      notificar(`${ids.length} partituras removidas de la carpeta.`);
+      setSeleccionados(new Set());
+      setMostrarQuitarDeCarpeta(false);
+      await cargarTodo(true);
+    } catch (err: unknown) {
+      notificar(err instanceof Error ? err.message : 'Error al quitar de carpeta', 'error');
+    } finally {
+      setProcesandoAccion(false);
+    }
   };
 
   // Agregar etiquetas masivo
   const handleAgregarEtiquetasMasivo = async () => {
-    const tags = nuevasEtiquetasMasivo
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
-    if (tags.length === 0) return;
+    const tags = sanitizarEtiquetas(nuevasEtiquetasMasivo);
+    if (tags.length === 0) {
+      notificar('Escribe al menos una etiqueta válida.', 'error');
+      return;
+    }
 
     const items = partituras.filter((p) => seleccionados.has(p.id));
     try {
@@ -236,9 +267,9 @@ export const TablaRepertorio: React.FC = () => {
       setMostrarModalEtiquetas(false);
       setNuevasEtiquetasMasivo('');
       setSeleccionados(new Set());
-      cargarTodo(true);
+      await cargarTodo(true);
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Error al agregar etiquetas');
+      notificar(err instanceof Error ? err.message : 'Error al agregar etiquetas', 'error');
     } finally {
       setProcesandoAccion(false);
     }
@@ -252,12 +283,37 @@ export const TablaRepertorio: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Mensaje de feedback flotante */}
-      {mensajeFeedback && (
-        <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-medium flex items-center justify-between">
-          <span>✓ {mensajeFeedback}</span>
-          <button type="button" onClick={() => setMensajeFeedback(null)} className="text-emerald-400">
+      {/* Mensaje de feedback */}
+      {feedback && (
+        <div
+          className={`p-3 rounded-xl border text-xs font-medium flex items-center justify-between ${
+            feedback.tipo === 'ok'
+              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+              : 'bg-red-500/10 border-red-500/30 text-red-300'
+          }`}
+          role={feedback.tipo === 'error' ? 'alert' : 'status'}
+        >
+          <span>{feedback.tipo === 'ok' ? '✓' : '✕'} {feedback.mensaje}</span>
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            className="p-1 rounded hover:bg-white/10"
+            aria-label="Cerrar mensaje"
+          >
             ✕
+          </button>
+        </div>
+      )}
+
+      {errorCarga && (
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex flex-wrap items-center justify-between gap-2" role="alert">
+          <span>No se pudo cargar el repertorio: {errorCarga}</span>
+          <button
+            type="button"
+            onClick={() => cargarTodo(true)}
+            className="px-3 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 font-medium"
+          >
+            Reintentar
           </button>
         </div>
       )}
@@ -270,14 +326,16 @@ export const TablaRepertorio: React.FC = () => {
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             placeholder="Buscar por título o etiqueta..."
+            aria-label="Buscar en el repertorio del admin"
             className="w-full pl-9 pr-4 py-2 bg-[#0a0a0f] border border-white/10 rounded-xl text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[#f5b942]/60"
           />
-          <span className="absolute left-3 top-2.5 text-gray-500 text-xs">🔍</span>
+          <span className="absolute left-3 top-2.5 text-gray-500 text-xs" aria-hidden="true">🔍</span>
           {busqueda && (
             <button
               type="button"
               onClick={() => setBusqueda('')}
-              className="absolute right-3 top-2 text-gray-400 hover:text-white text-xs"
+              className="absolute right-3 top-2 text-gray-400 hover:text-white text-xs p-1"
+              aria-label="Limpiar búsqueda"
             >
               ✕
             </button>
@@ -305,6 +363,7 @@ export const TablaRepertorio: React.FC = () => {
             type="button"
             onClick={() => cargarTodo(true)}
             title="Recargar datos"
+            aria-label="Recargar datos"
             className="p-2 rounded-xl bg-white/5 text-gray-400 hover:text-white transition-colors text-xs"
           >
             🔄
@@ -371,7 +430,7 @@ export const TablaRepertorio: React.FC = () => {
       {/* Tabla del Repertorio */}
       <div className="bg-[#14141c] border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+          <table className="w-full min-w-[760px] text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-white/10 bg-[#0a0a0f]/60 text-gray-400 font-medium">
                 <th className="py-3 px-4 w-10">
@@ -420,6 +479,8 @@ export const TablaRepertorio: React.FC = () => {
                             type="text"
                             value={nombreEdicion}
                             onChange={(e) => setNombreEdicion(e.target.value)}
+                            maxLength={LIMITES.nombrePartitura}
+                            aria-label="Nombre de la partitura"
                             className="w-full px-2.5 py-1.5 rounded-lg bg-[#0a0a0f] border border-white/20 text-white text-xs focus:outline-none focus:border-[#f5b942]"
                             placeholder="Nombre de la partitura"
                           />
@@ -429,6 +490,7 @@ export const TablaRepertorio: React.FC = () => {
                             type="text"
                             value={etiquetasEdicion}
                             onChange={(e) => setEtiquetasEdicion(e.target.value)}
+                            aria-label="Etiquetas separadas por coma"
                             className="w-full px-2.5 py-1.5 rounded-lg bg-[#0a0a0f] border border-white/20 text-white text-xs focus:outline-none focus:border-[#f5b942]"
                             placeholder="Etiquetas separadas por coma..."
                           />
@@ -537,6 +599,7 @@ export const TablaRepertorio: React.FC = () => {
                             type="button"
                             onClick={() => comenzarEdicion(p)}
                             title="Editar nombre y etiquetas"
+                            aria-label={`Editar ${p.nombre}`}
                             className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-[#f5b942] transition-colors"
                           >
                             ✏️
@@ -545,6 +608,7 @@ export const TablaRepertorio: React.FC = () => {
                             type="button"
                             onClick={() => setPartituraAEliminar(p)}
                             title="Eliminar del general y de todas las carpetas"
+                            aria-label={`Eliminar ${p.nombre}`}
                             className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
                           >
                             🗑️
@@ -597,7 +661,12 @@ export const TablaRepertorio: React.FC = () => {
       {/* MODAL: Agregar etiquetas masivo */}
       {mostrarModalEtiquetas && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#14141c] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Agregar etiquetas a las partituras seleccionadas"
+            className="bg-[#14141c] border border-white/10 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+          >
             <h3 className="text-base font-semibold text-gray-100 flex items-center gap-2">
               <span>🏷️</span>
               <span>Agregar etiquetas a {seleccionados.size} partituras</span>
@@ -636,7 +705,12 @@ export const TablaRepertorio: React.FC = () => {
       {/* MODAL: Confirmar eliminación individual */}
       {partituraAEliminar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#14141c] border border-red-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirmar eliminación de partitura"
+            className="bg-[#14141c] border border-red-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+          >
             <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center text-xl mx-auto">
               ⚠️
             </div>
@@ -672,7 +746,12 @@ export const TablaRepertorio: React.FC = () => {
       {/* MODAL: Confirmar eliminación masiva */}
       {confirmarEliminarMasivo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[#14141c] border border-red-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirmar eliminación masiva de partituras"
+            className="bg-[#14141c] border border-red-500/30 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+          >
             <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-400 flex items-center justify-center text-xl mx-auto">
               ⚠️
             </div>
