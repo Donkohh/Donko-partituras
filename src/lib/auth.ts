@@ -24,15 +24,19 @@ export async function iniciarSesionAdmin(
     options: opcionesAuth,
   });
 
-  if (error || !data.session || !data.user) {
-    // Mensaje genérico de seguridad para no filtrar si el email existe
+  if (error) {
+    console.error('[Auth Error Detalle]:', error.message, error);
+    throw new Error('Credenciales inválidas');
+  }
+
+  if (!data.session || !data.user) {
     throw new Error('Credenciales inválidas');
   }
 
   // Comprobar estrictamente rol 'admin' en app_metadata
   const rol = data.user.app_metadata?.role;
   if (rol !== 'admin') {
-    // Si no es admin, revocar sesión de inmediato
+    console.warn('[Auth Warning]: Usuario autenticado pero sin rol admin en app_metadata:', data.user.app_metadata);
     await supabase.auth.signOut();
     throw new Error('Credenciales inválidas');
   }

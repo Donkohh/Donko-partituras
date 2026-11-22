@@ -30,6 +30,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginExitoso }) => {
       await iniciarSesionAdmin(email, password, captchaToken);
       onLoginExitoso();
     } catch (err: unknown) {
+      console.error('[Login Catch]:', err);
       // Mensaje estrictamente genérico según sección 5 y 7 de AGENTS.md
       setError('Credenciales inválidas');
       setCaptchaToken(undefined);
