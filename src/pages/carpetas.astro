@@ -1,0 +1,10 @@
+---
+import Base from '../layouts/Base.astro';
+import { ListaCarpetas } from '../components/public/ListaCarpetas';
+---
+
+<Base title="Donko Partituras — Carpetas">
+  <div class="py-4">
+    <ListaCarpetas client:load />
+  </div>
+</Base>
