@@ -102,7 +102,15 @@ const currentPath = Astro.url.pathname;
     <footer class="border-t border-white/5 py-8 text-center text-xs text-gray-500">
       <div class="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
         <p>Donko Partituras &copy; {new Date().getFullYear()} — Todos los derechos reservados</p>
-        <p class="text-gray-600">Repertorio musical público</p>
+        <p class="text-gray-600">
+          Repertorio musical público
+          <a
+            href="/admin"
+            aria-label="Gestión"
+            class="ml-3 opacity-20 hover:opacity-60 transition-opacity duration-300 select-none"
+            tabindex="-1"
+          >⚙</a>
+        </p>
       </div>
     </footer>
   </body>
