@@ -1,0 +1,10 @@
+---
+import Base from '../layouts/Base.astro';
+import { AdminPanel } from '../components/admin/AdminPanel';
+---
+
+<Base title="Administración — Donko Partituras" noindex={true}>
+  <div class="py-4">
+    <AdminPanel client:load />
+  </div>
+</Base>
